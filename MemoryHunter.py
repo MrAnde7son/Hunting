@@ -7,6 +7,14 @@ import sys
 from subprocess import *
 from optparse import OptionParser
 import re
+import string
+import shutil
+
+
+### GLOBALS ###
+powershell_command = ["-exec", "hidden", "frombase64string", "-nopr", "-enc", "iex", "net.webclient"]
+powershell_output = ["system.reflection.assemblyname", "token_privilege_enabled", "token_impersonate", "token_duplicate", "token_adjust_privileges", "system.reflection.emit.assemblybuilderaccess", "se_privilege_enabled"]
+macro = ["public declare ptrsafe function", ".ShellExecute", "String.FromCharCode", "WScript.Shell"]
 
 def banner():
     # Prints Banner
@@ -20,9 +28,10 @@ def banner():
                                                       |___/                                    """)
     print "\nMemoryHunter - Extracts and scans code from memory.\n\n\n"
 
-def run_volatility_plugin(profile, filename, plugin, kdbgoffset, outdir,output):
-    plugin_result = Popen(['vol.py', '--profile', profile, '-f', filename, '-g', kdbgoffset, plugin, '-D', outdir], stdout=output,stderr=output)
+def run_volatility_plugin(profile, filename, plugin, outdir,output):
+    plugin_result = Popen(['vol.py', '--profile', profile, '-f', filename, plugin, '-D', outdir], stdout=output,stderr=output)
     plugin_result.wait()
+
 
 def main():
     # READ SYS.ARGV VARIABLES ================================================================
@@ -38,7 +47,7 @@ def main():
 
     devnull = open(os.devnull, 'w')
 
-    # Determines KDBG offset
+    '''# Determines KDBG offset
     print "Determining kdbg offset..."
     kdbg = open('/tmp/kdbg','w')
     kdbgscan = Popen(['vol.py', '--profile', options.profile, '-f', options.filename, 'kdbgscan'], stdout=kdbg,stderr=devnull)
@@ -47,7 +56,7 @@ def main():
     regex = re.search('KdCopyDataBlock.+(0x\w+)',open('/tmp/kdbg','r').read())
     kdbg_offset = regex.group(1)
     os.remove('/tmp/kdbg')
-
+'''
     # Creates all directories
     dlldir = options.outdir + '/dlldump'
     maldir = options.outdir + '/malfind'
@@ -58,29 +67,63 @@ def main():
         os.mkdir(dlldir)
         os.mkdir(maldir)
         os.mkdir(moddir)
+        # Report Generation
+        result = open(options.outdir + '/report.txt', 'w')
     except:
         print "Error creating directories."
         exit()
 
     # Extracting code from memory, dlls, potential code injections and kernel modules
     print "Extracting code from memory..."
-    run_volatility_plugin(options.profile,options.filename,'dlldump',kdbg_offset,dlldir+'/',devnull)
-    run_volatility_plugin(options.profile,options.filename,'malfind',kdbg_offset,maldir+'/',devnull)
-    run_volatility_plugin(options.profile,options.filename,'moddump',kdbg_offset,moddir+'/',devnull)
+    run_volatility_plugin(options.profile,options.filename,'dlldump',dlldir+'/',devnull)
+    run_volatility_plugin(options.profile,options.filename,'malfind',maldir+'/',devnull)
+    run_volatility_plugin(options.profile,options.filename,'moddump',moddir+'/',devnull)
 
-    # Filters 'malfind' results
+    '''# Filters 'malfind' results
     filter = Popen(['file', maldir,"/* | grep data | cut -f1 -d':' | xargs rm"], stdout=devnull,stderr=devnull)
     filter.wait()
+'''
 
     # Scans extracted code
     print "Scanning results using ClamAV..."
-    result = open(options.outdir+'/scan.txt','w')
     scan = Popen(['clamscan', '-r', options.outdir, '-i'], stdout=result,stderr=devnull)
     scan.wait()
+
+    # Scans for suspicious strings
+    print "Seeking suspicious strings..."
+    result.write("PowerShell Commands Indicators:\n")
+    for str in powershell_command:
+        scan = Popen(['grep', '-i', str, options.filename], stdout=PIPE, stderr=devnull)
+        scan.wait()
+        if scan.stdout.read() != "":
+            result.write("Found " + str + "\n")
+    result.write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n")
+    result.write("PowerShell Strings Indicators:\n")
+    for str in powershell_output:
+        scan = Popen(['grep', '-i', str, options.filename], stdout=PIPE, stderr=devnull)
+        scan.wait()
+        if scan.stdout.read() != "":
+            result.write("Found " + str + "\n")
+    result.write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n")
+    result.write("Macro Code Indicators:\n")
+    for str in macro:
+        scan = Popen(['grep', '-i', str, options.filename], stdout=PIPE, stderr=devnull)
+        scan.wait()
+        if scan.stdout.read() != "":
+            result.write("Found " + str + "\n")
+    result.write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n")
+
     devnull.close()
-    result.close();
+    result.close()
     print "MemoryHunter finished."
 
 if __name__ == '__main__':
     banner()
     main()
+    exit()
+    #try:
+    '''except:
+        shutil.rmtree(sys.argv[len(sys.argv)-1])
+        print "Unexpected error:", sys.exc_info()[1]
+        exit()
+'''
