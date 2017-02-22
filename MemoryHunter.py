@@ -32,7 +32,6 @@ def run_volatility_plugin(profile, filename, plugin, outdir,output):
     plugin_result = Popen(['vol.py', '--profile', profile, '-f', filename, plugin, '-D', outdir], stdout=output,stderr=output)
     plugin_result.wait()
 
-
 def main():
     # READ SYS.ARGV VARIABLES ================================================================
     usage = './memoryHunter.py [VOL_OPTIONS]\nAutomatic volatility plugins runner for Windows 8.1.\n'
@@ -79,39 +78,51 @@ def main():
     run_volatility_plugin(options.profile,options.filename,'malfind',maldir+'/',devnull)
     run_volatility_plugin(options.profile,options.filename,'moddump',moddir+'/',devnull)
 
-    '''# Filters 'malfind' results
-    filter = Popen(['file', maldir,"/* | grep data | cut -f1 -d':' | xargs rm"], stdout=devnull,stderr=devnull)
-    filter.wait()
-'''
-
     # Scans extracted code
     print "Scanning results using ClamAV..."
-    scan = Popen(['clamscan', '-r', options.outdir, '-i'], stdout=result,stderr=devnull)
-    scan.wait()
+    cmd = Popen(['clamscan', '-r', options.outdir, '-i'], stdout=result,stderr=devnull)
+    cmd.wait()
 
     # Scans for suspicious strings
     print "Seeking suspicious strings..."
+    result.write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n")
     result.write("PowerShell Commands Indicators:\n")
+    result.write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n")
     for str in powershell_command:
-        scan = Popen(['grep', '-i', str, options.filename], stdout=PIPE, stderr=devnull)
-        scan.wait()
-        if scan.stdout.read() != "":
+        cmd = Popen(['grep', '-i', str, options.filename], stdout=PIPE, stderr=devnull)
+        cmd.wait()
+        if cmd.stdout.read() != "":
             result.write("Found " + str + "\n")
     result.write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n")
     result.write("PowerShell Strings Indicators:\n")
+    result.write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n")
     for str in powershell_output:
-        scan = Popen(['grep', '-i', str, options.filename], stdout=PIPE, stderr=devnull)
-        scan.wait()
-        if scan.stdout.read() != "":
+        cmd = Popen(['grep', '-i', str, options.filename], stdout=PIPE, stderr=devnull)
+        cmd.wait()
+        if cmd.stdout.read() != "":
             result.write("Found " + str + "\n")
     result.write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n")
     result.write("Macro Code Indicators:\n")
+    result.write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n")
     for str in macro:
-        scan = Popen(['grep', '-i', str, options.filename], stdout=PIPE, stderr=devnull)
-        scan.wait()
-        if scan.stdout.read() != "":
+        cmd = Popen(['grep', '-i', str, options.filename], stdout=PIPE, stderr=devnull)
+        cmd.wait()
+        if cmd.stdout.read() != "":
             result.write("Found " + str + "\n")
     result.write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n")
+
+    # Running yara rules scan
+    print "Running yara rules against memory dump..."
+    cmd = Popen(['find', './rules/', '-name', '*.yar'], stdout=PIPE, stderr=devnull)
+    cmd.wait()
+    result.write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n")
+    result.write('Yara Rules Hits')
+    result.write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n")
+    for path in cmd.stdout.read():
+        cmd = Popen(['vol.py', '--profile', options.profile, '-f', options.filename, 'yarascan', '--yara-file=', path], stdout=PIPE,stderr=devnull)
+        cmd.wait()
+        if cmd.stdout.read() != "":
+            result.write(cmd.stdout.read())
 
     devnull.close()
     result.close()
